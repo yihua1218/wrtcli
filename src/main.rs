@@ -33,6 +33,12 @@ enum Commands {
     Status {
         /// Name of the device
         name: String,
+        /// Display raw values (KB, seconds) instead of human readable format
+        #[arg(long)]
+        raw: bool,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
     /// Reboot an OpenWrt device
     Reboot {
@@ -52,8 +58,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::List => {
             commands::list_devices().await?;
         }
-        Commands::Status { name } => {
-            commands::get_status(&name).await?;
+        Commands::Status { name, raw, json } => {
+            commands::get_status(&name, raw, json).await?;
         }
         Commands::Reboot { name } => {
             commands::reboot_device(&name).await?;

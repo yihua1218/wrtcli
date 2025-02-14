@@ -33,8 +33,9 @@ The screenshot above demonstrates:
 - Device listing functionality showing registered devices
 - Detailed status display including:
   - Device model and hostname
-  - System uptime and load
-  - Memory usage statistics with clear formatting
+  - System uptime (formatted as days/hours/minutes/seconds)
+  - System load
+  - Memory usage statistics (with MB and usage percentage)
 
 ## Usage
 
@@ -47,8 +48,17 @@ wrtcli add router1 --ip 192.168.1.1 --user root --password mypassword
 # List all registered devices
 wrtcli list
 
-# Get device status
+# Get device status (default: human readable format)
 wrtcli status router1
+
+# Get status with raw values (seconds for uptime, KB for memory)
+wrtcli status router1 --raw
+
+# Get status in JSON format
+wrtcli status router1 --json
+
+# Get status in JSON format with raw values
+wrtcli status router1 --json --raw
 
 # Reboot a device
 wrtcli reboot router1

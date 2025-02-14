@@ -33,8 +33,9 @@ cargo install --path .
 - 已註冊設備的列表功能
 - 詳細的狀態顯示，包含：
   - 設備型號與主機名稱
-  - 系統運行時間與負載
-  - 記憶體使用狀況，格式清楚易讀
+  - 系統運行時間（以天、小時、分鐘、秒顯示）
+  - 系統負載
+  - 記憶體使用狀況（以 MB 與使用百分比顯示）
 
 ## 使用方式
 
@@ -47,8 +48,17 @@ wrtcli add router1 --ip 192.168.1.1 --user root --password mypassword
 # 顯示所有已註冊的設備
 wrtcli list
 
-# 取得設備狀態
+# 取得設備狀態（預設：人性化格式顯示）
 wrtcli status router1
+
+# 取得原始數值格式的狀態（秒數顯示運行時間，KB 顯示記憶體）
+wrtcli status router1 --raw
+
+# 以 JSON 格式輸出狀態
+wrtcli status router1 --json
+
+# 以 JSON 格式輸出原始數值狀態
+wrtcli status router1 --json --raw
 
 # 重新啟動設備
 wrtcli reboot router1

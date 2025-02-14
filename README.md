@@ -14,7 +14,7 @@ A CLI tool for managing OpenWrt devices, written in Rust.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yihua12/wrtcli
+git clone https://github.com/yihua1218/wrtcli.git
 cd wrtcli
 
 # Build the project

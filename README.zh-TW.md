@@ -14,7 +14,7 @@
 
 ```bash
 # 下載專案
-git clone https://github.com/yihua1218/wrtcli
+git clone https://github.com/yihua1218/wrtcli.git
 cd wrtcli
 
 # 建置專案

@@ -5,6 +5,7 @@ use serde_json::json;
 use serde::Serialize;
 use std::time::Duration;
 use std::fs;
+use std::io::Read;
 use tempfile::NamedTempFile;
 use tar::Builder;
 use flate2::{write::GzEncoder, Compression};

@@ -10,6 +10,7 @@ use std::io::{Read, Write};
 use tempfile::NamedTempFile;
 use tar::Builder;
 use flate2::{write::GzEncoder, Compression};
+use tracing::{debug};
 
 #[derive(Serialize)]
 struct StatusOutput {
@@ -309,19 +310,23 @@ async fn get_luci_session(client: &Client, device: &Device) -> Result<String> {
 }
 
 pub async fn create_backup(name: &str, description: Option<String>, use_ubus: bool) -> Result<()> {
+    debug!("Starting create_backup for device: {}", name);
     let config = ConfigManager::new()?;
     let device = config
         .get_device(name)?
         .context(format!("Device '{}' not found", name))?;
+    debug!("Device found: {:?}", device);
 
     let client = Client::builder()
         .timeout(Duration::from_secs(30))
         .build()?;
+    debug!("HTTP client created");
 
     let temp_file = NamedTempFile::new()?;
     let backup_info;
 
     if use_ubus {
+        debug!("Using UBUS for backup");
         // Original UBUS-based backup implementation
         let encoder = GzEncoder::new(temp_file.reopen()?, Compression::default());
         let mut archive = Builder::new(encoder);
@@ -331,12 +336,14 @@ pub async fn create_backup(name: &str, description: Option<String>, use_ubus: bo
         sess.set_tcp_stream(tcp);
         sess.handshake()?;
         sess.userauth_password(&device.user, &device.password)?;
+        debug!("SSH session established");
 
         let config_files = vec![
             "system", "wireless", "network", "dhcp", "firewall"
         ];
 
         for config_name in config_files {
+            debug!("Backing up config: {}", config_name);
             // Try to read and backup each config file
             if let Ok(mut channel) = sess.channel_session() {
                 channel.exec(&format!("cat /etc/config/{}", config_name))?;
@@ -357,6 +364,7 @@ pub async fn create_backup(name: &str, description: Option<String>, use_ubus: bo
         }
 
         // Get system info from board.json
+        debug!("Getting system info from board.json");
         if let Ok(mut channel) = sess.channel_session() {
             channel.exec("cat /etc/board.json")?;
             let mut content = String::new();
@@ -376,10 +384,12 @@ pub async fn create_backup(name: &str, description: Option<String>, use_ubus: bo
 
         // Make sure to finish the archive before dropping it
         archive.finish()?;
+        debug!("Archive finished");
 
         // Make sure the file is complete before moving it
         temp_file.as_file().sync_all()?;
-        
+        debug!("Temporary file sync complete");
+
         backup_info = config.add_backup(
             name,
             description,
@@ -387,19 +397,28 @@ pub async fn create_backup(name: &str, description: Option<String>, use_ubus: bo
             "ubus".to_string(),
         )?;
     } else {
+        debug!("Using LuCI API for backup");
         // LuCI API backup implementation
         let session = get_luci_session(&client, &device).await?;
+        debug!("Obtained LuCI session token: {}", session);
         
         let response = client
             .get(&format!("{}/cgi-bin/luci/admin/system/flashops/backup", device.luci_url()))
             .header("Cookie", format!("sysauth={}", session))
             .send()
             .await?;
+        debug!("Backup request sent, status: {}", response.status());
 
-        let content = response.bytes().await?;
+        let response_text = response.text().await?;
+        debug!("Backup response body: {}", response_text);
+
+        let content = response_text.into_bytes();
+        debug!("Backup content received, size: {} bytes", content.len());
+
         let mut file = temp_file.reopen()?;
         file.write_all(&content)?;
         file.sync_all()?;
+        debug!("Backup content written to temporary file");
 
         backup_info = config.add_backup(
             name,
@@ -407,9 +426,10 @@ pub async fn create_backup(name: &str, description: Option<String>, use_ubus: bo
             temp_file.path().to_path_buf(),
             "luci".to_string(),
         )?;
+        debug!("Backup information saved to config");
     }
     
-    println!("✅ Backup created successfully");
+    debug!("Backup created successfully");
     println!("ID: {}", backup_info.id);
     println!("Filename: {}", backup_info.filename);
     println!("Created: {}", backup_info.created_at.format("%Y-%m-%d %H:%M:%S"));

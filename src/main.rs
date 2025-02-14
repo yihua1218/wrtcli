@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use tracing_subscriber;
 mod config;
 mod models;
 mod commands;
@@ -92,6 +93,9 @@ enum BackupCommands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Initialize tracing
+    tracing_subscriber::fmt::init();
+    
     let cli = Cli::parse();
 
     match cli.command {

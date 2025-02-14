@@ -10,6 +10,7 @@ pub struct BackupInfo {
     pub device_name: String,
     pub description: Option<String>,
     pub backup_type: String,
+    pub backup_method: String,  // "luci" or "ubus"
     pub size: u64,
 }
 
@@ -101,5 +102,9 @@ impl Device {
 
     pub fn ubus_url(&self) -> String {
         format!("http://{}/ubus", self.ip)
+    }
+
+    pub fn luci_url(&self) -> String {
+        format!("http://{}", self.ip)
     }
 }

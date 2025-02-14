@@ -1,11 +1,11 @@
 use crate::config::ConfigManager;
 use anyhow::{Context, Result};
-use reqwest::Client;
+use reqwest::{Client, multipart};
 use serde_json::json;
 use serde::Serialize;
 use std::time::Duration;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use tempfile::NamedTempFile;
 use tar::Builder;
 use flate2::{write::GzEncoder, Compression};
@@ -289,19 +289,41 @@ pub async fn reboot_device(name: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn create_backup(name: &str, description: Option<String>) -> Result<()> {
+// Helper function to get LuCI session token
+async fn get_luci_session(client: &Client, device: &Device) -> Result<String> {
+    let response = client
+        .post(&format!("{}/cgi-bin/luci/rpc/auth", device.luci_url()))
+        .form(&[
+            ("username", &device.user),
+            ("password", &device.password),
+        ])
+        .send()
+        .await?;
+
+    let data = response.json::<serde_json::Value>().await?;
+    data["result"]
+        .as_str()
+        .context("Failed to get LuCI session token")
+        .map(|s| s.to_string())
+}
+
+pub async fn create_backup(name: &str, description: Option<String>, use_ubus: bool) -> Result<()> {
     let config = ConfigManager::new()?;
     let device = config
         .get_device(name)?
         .context(format!("Device '{}' not found", name))?;
 
-    // Create temporary file and tar builder
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+
     let temp_file = NamedTempFile::new()?;
-    {
+    let mut backup_info;
+
+    if use_ubus {
+        // Original UBUS-based backup implementation
         let encoder = GzEncoder::new(temp_file.reopen()?, Compression::default());
         let mut archive = Builder::new(encoder);
-
-        // Use SSH to read config files
         let tcp = tokio::net::TcpStream::connect(&format!("{}:22", device.ip)).await?;
         let tcp = tcp.into_std()?;
         let mut sess = ssh2::Session::new()?;
@@ -351,16 +373,40 @@ pub async fn create_backup(name: &str, description: Option<String>) -> Result<()
             }
         }
 
-
         // Make sure to finish the archive before dropping it
         archive.finish()?;
-    }
 
-    // Make sure the file is complete before moving it
-    temp_file.as_file().sync_all()?;
-    
-    // Add backup to the device's backup directory
-    let backup_info = config.add_backup(name, description, temp_file.path().to_path_buf())?;
+        // Make sure the file is complete before moving it
+        temp_file.as_file().sync_all()?;
+        
+        backup_info = config.add_backup(
+            name,
+            description,
+            temp_file.path().to_path_buf(),
+            "ubus".to_string(),
+        )?;
+    } else {
+        // LuCI API backup implementation
+        let session = get_luci_session(&client, &device).await?;
+        
+        let response = client
+            .get(&format!("{}/cgi-bin/luci/admin/system/flashops/backup", device.luci_url()))
+            .header("Cookie", format!("sysauth={}", session))
+            .send()
+            .await?;
+
+        let content = response.bytes().await?;
+        let mut file = temp_file.reopen()?;
+        file.write_all(&content)?;
+        file.sync_all()?;
+
+        backup_info = config.add_backup(
+            name,
+            description,
+            temp_file.path().to_path_buf(),
+            "luci".to_string(),
+        )?;
+    }
     
     println!("✅ Backup created successfully");
     println!("ID: {}", backup_info.id);
@@ -427,7 +473,7 @@ pub async fn remove_backup(name: &str, backup_id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn restore_backup(name: &str, backup_id: &str) -> Result<()> {
+pub async fn restore_backup(name: &str, backup_id: &str, use_ubus: bool) -> Result<()> {
     let config = ConfigManager::new()?;
     let device = config
         .get_device(name)?
@@ -441,53 +487,75 @@ pub async fn restore_backup(name: &str, backup_id: &str) -> Result<()> {
         .timeout(Duration::from_secs(30))  // Longer timeout for restore
         .build()?;
 
-    // Login first
-    let login_response = client
-        .post(&device.ubus_url())
-        .json(&json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "call",
-            "params": [
-                "00000000000000000000000000000000",
-                "session",
-                "login",
-                {
-                    "username": device.user,
-                    "password": device.password
-                }
-            ]
-        }))
-        .send()
-        .await?;
-
-    let login_data = login_response.json::<serde_json::Value>().await?;
-    let session = login_data["result"][1]["ubus_rpc_session"]
-        .as_str()
-        .context("Failed to get session token")?;
-
     // Read backup file
     let backup_path = config.get_backup_dir(name)?.join(&backup.filename);
     let backup_data = fs::read(backup_path)?;
 
-    // Send restore command with backup data
-    client
-        .post(&device.ubus_url())
-        .json(&json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "call",
-            "params": [
-                session,
-                "system",
-                "restore",
-                {
-                    "backup": backup_data
-                }
-            ]
-        }))
-        .send()
-        .await?;
+    if use_ubus {
+        // Original UBUS-based restore implementation
+        let login_response = client
+            .post(&device.ubus_url())
+            .json(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "call",
+                "params": [
+                    "00000000000000000000000000000000",
+                    "session",
+                    "login",
+                    {
+                        "username": device.user,
+                        "password": device.password
+                    }
+                ]
+            }))
+            .send()
+            .await?;
+
+        let login_data = login_response.json::<serde_json::Value>().await?;
+        let session = login_data["result"][1]["ubus_rpc_session"]
+            .as_str()
+            .context("Failed to get session token")?;
+
+        // Send restore command with backup data
+        client
+            .post(&device.ubus_url())
+            .json(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "call",
+                "params": [
+                    session,
+                    "system",
+                    "restore",
+                    {
+                        "backup": backup_data
+                    }
+                ]
+            }))
+            .send()
+            .await?;
+    } else {
+        // LuCI API restore implementation
+        let session = get_luci_session(&client, &device).await?;
+        
+        let form = multipart::Form::new()
+            .file("archive", backup_path)?;
+
+        client
+            .post(&format!("{}/cgi-bin/luci/admin/system/flashops/restore", device.luci_url()))
+            .header("Cookie", format!("sysauth={}", session))
+            .multipart(form)
+            .send()
+            .await?;
+
+        // Trigger reboot after restore
+        client
+            .post(&format!("{}/cgi-bin/luci/admin/system/reboot", device.luci_url()))
+            .header("Cookie", format!("sysauth={}", session))
+            .send()
+            .await?;
+    }
 
     println!("✅ Backup '{}' restored successfully to device '{}'", backup_id, name);
     println!("ℹ️  The device will reboot to apply the restored configuration");

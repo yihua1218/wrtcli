@@ -60,7 +60,7 @@ impl ConfigManager {
         Ok(())
     }
 
-    pub fn add_backup(&self, device_name: &str, description: Option<String>, backup_path: PathBuf) -> Result<BackupInfo> {
+    pub fn add_backup(&self, device_name: &str, description: Option<String>, backup_path: PathBuf, backup_method: String) -> Result<BackupInfo> {
         let mut meta = self.load_backup_meta(device_name)?;
         let timestamp = Local::now();
         let id = timestamp.format("%Y%m%d_%H%M%S").to_string();
@@ -73,6 +73,7 @@ impl ConfigManager {
             device_name: device_name.to_string(),
             description,
             backup_type: "full".to_string(),
+            backup_method,
             size: fs::metadata(&backup_path)?.len(),
         };
 

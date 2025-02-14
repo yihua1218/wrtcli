@@ -1,5 +1,47 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use chrono::{DateTime, Local};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupInfo {
+    pub id: String,
+    pub filename: String,
+    pub created_at: DateTime<Local>,
+    pub device_name: String,
+    pub description: Option<String>,
+    pub backup_type: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupMeta {
+    pub backups: Vec<BackupInfo>,
+}
+
+impl BackupMeta {
+    pub fn new() -> Self {
+        Self {
+            backups: Vec::new(),
+        }
+    }
+
+    pub fn add_backup(&mut self, backup: BackupInfo) {
+        self.backups.push(backup);
+    }
+
+    pub fn get_backup(&self, id: &str) -> Option<&BackupInfo> {
+        self.backups.iter().find(|b| b.id == id)
+    }
+
+    pub fn remove_backup(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.backups.iter().position(|b| b.id == id) {
+            self.backups.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {

@@ -64,6 +64,27 @@ wrtcli status router1 --json --raw
 wrtcli reboot router1
 ```
 
+### 備份管理
+
+```bash
+# 建立備份（可選擇添加描述）
+wrtcli backup create router1 --description "韌體更新前的備份"
+
+# 列出設備的所有備份
+wrtcli backup list router1
+
+# 顯示特定備份的詳細資訊
+wrtcli backup show router1 {備份ID}
+
+# 還原備份（還原後設備會自動重新啟動）
+wrtcli backup restore router1 {備份ID}
+
+# 刪除備份
+wrtcli backup remove router1 {備份ID}
+```
+
+所有備份檔案都存放在 `~/.wrtcli/backups/{device-name}/` 目錄下，並使用 metadata.json 檔案追蹤備份資訊。
+
 ### 設定檔
 
 設定檔儲存於 `~/.wrtcli/config.toml`，用於安全地管理設備資訊。
@@ -108,6 +129,7 @@ cargo build --release
 
 - [x] 核心設備管理
 - [x] 基本狀態監控
+- [x] 設定備份與還原
 - [ ] Wi-Fi 管理
 - [ ] DHCP 操作
 - [ ] DNS 管理

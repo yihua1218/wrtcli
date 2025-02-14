@@ -64,6 +64,27 @@ wrtcli status router1 --json --raw
 wrtcli reboot router1
 ```
 
+### Backup Management
+
+```bash
+# Create a backup with optional description
+wrtcli backup create router1 --description "Before firmware update"
+
+# List all backups for a device
+wrtcli backup list router1
+
+# Show detailed information about a specific backup
+wrtcli backup show router1 {backup-id}
+
+# Restore a backup (device will reboot after restore)
+wrtcli backup restore router1 {backup-id}
+
+# Remove a backup
+wrtcli backup remove router1 {backup-id}
+```
+
+All backup files are stored in `~/.wrtcli/backups/{device-name}/` directory, with a metadata.json file tracking backup information.
+
 ### Configuration
 
 Configuration is stored in `~/.wrtcli/config.toml` and manages device information securely.
@@ -108,6 +129,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - [x] Core device management
 - [x] Basic status monitoring
+- [x] Configuration backup and restore
 - [ ] Wi-Fi management
 - [ ] DHCP operations
 - [ ] DNS management

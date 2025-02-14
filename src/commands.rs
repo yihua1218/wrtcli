@@ -4,6 +4,10 @@ use reqwest::Client;
 use serde_json::json;
 use serde::Serialize;
 use std::time::Duration;
+use std::fs;
+use tempfile::NamedTempFile;
+use tar::Builder;
+use flate2::{write::GzEncoder, Compression};
 
 #[derive(Serialize)]
 struct StatusOutput {
@@ -281,5 +285,211 @@ pub async fn reboot_device(name: &str) -> Result<()> {
         .await?;
 
     println!("🔄 Rebooting device '{}'...", name);
+    Ok(())
+}
+
+pub async fn create_backup(name: &str, description: Option<String>) -> Result<()> {
+    let config = ConfigManager::new()?;
+    let device = config
+        .get_device(name)?
+        .context(format!("Device '{}' not found", name))?;
+
+    // Create temporary file and tar builder
+    let temp_file = NamedTempFile::new()?;
+    {
+        let encoder = GzEncoder::new(temp_file.reopen()?, Compression::default());
+        let mut archive = Builder::new(encoder);
+
+        // Use SSH to read config files
+        let tcp = tokio::net::TcpStream::connect(&format!("{}:22", device.ip)).await?;
+        let tcp = tcp.into_std()?;
+        let mut sess = ssh2::Session::new()?;
+        sess.set_tcp_stream(tcp);
+        sess.handshake()?;
+        sess.userauth_password(&device.user, &device.password)?;
+
+        let config_files = vec![
+            "system", "wireless", "network", "dhcp", "firewall"
+        ];
+
+        for config_name in config_files {
+            // Try to read and backup each config file
+            if let Ok(mut channel) = sess.channel_session() {
+                channel.exec(&format!("cat /etc/config/{}", config_name))?;
+                let mut content = String::new();
+                channel.read_to_string(&mut content)?;
+                channel.wait_close()?;
+
+                if channel.exit_status()? == 0 && !content.is_empty() {
+                    println!("✅ Backing up config: {}", config_name);
+                    let mut header = tar::Header::new_gnu();
+                    header.set_size(content.len() as u64);
+                    header.set_mode(0o644);
+                    archive.append_data(&mut header, format!("etc/config/{}", config_name), content.as_bytes())?;
+                } else {
+                    println!("❌ Failed to read config: {}", config_name);
+                }
+            }
+        }
+
+        // Get system info from board.json
+        if let Ok(mut channel) = sess.channel_session() {
+            channel.exec("cat /etc/board.json")?;
+            let mut content = String::new();
+            channel.read_to_string(&mut content)?;
+            channel.wait_close()?;
+
+            if channel.exit_status()? == 0 && !content.is_empty() {
+                println!("✅ Backing up system info");
+                let mut header = tar::Header::new_gnu();
+                header.set_size(content.len() as u64);
+                header.set_mode(0o644);
+                archive.append_data(&mut header, "system_info.json", content.as_bytes())?;
+            } else {
+                println!("❌ Failed to read system info");
+            }
+        }
+
+
+        // Make sure to finish the archive before dropping it
+        archive.finish()?;
+    }
+
+    // Make sure the file is complete before moving it
+    temp_file.as_file().sync_all()?;
+    
+    // Add backup to the device's backup directory
+    let backup_info = config.add_backup(name, description, temp_file.path().to_path_buf())?;
+    
+    println!("✅ Backup created successfully");
+    println!("ID: {}", backup_info.id);
+    println!("Filename: {}", backup_info.filename);
+    println!("Created: {}", backup_info.created_at.format("%Y-%m-%d %H:%M:%S"));
+    if let Some(desc) = backup_info.description {
+        println!("Description: {}", desc);
+    }
+    println!("Size: {:.2} MB", backup_info.size as f64 / (1024.0 * 1024.0));
+    
+    Ok(())
+}
+
+pub async fn list_backups(name: &str) -> Result<()> {
+    let config = ConfigManager::new()?;
+    let meta = config.load_backup_meta(name)?;
+
+    if meta.backups.is_empty() {
+        println!("No backups found for device '{}'", name);
+        return Ok(());
+    }
+
+    println!("Backups for device '{}':", name);
+    println!("------------------------");
+    for backup in meta.backups.iter() {
+        println!("📦 {}", backup.id);
+        println!("   Created: {}", backup.created_at.format("%Y-%m-%d %H:%M:%S"));
+        if let Some(desc) = &backup.description {
+            println!("   Description: {}", desc);
+        }
+        println!("   Size: {:.2} MB", backup.size as f64 / (1024.0 * 1024.0));
+        println!();
+    }
+
+    Ok(())
+}
+
+pub async fn show_backup(name: &str, backup_id: &str) -> Result<()> {
+    let config = ConfigManager::new()?;
+    let meta = config.load_backup_meta(name)?;
+
+    if let Some(backup) = meta.get_backup(backup_id) {
+        println!("Backup details:");
+        println!("--------------");
+        println!("ID: {}", backup.id);
+        println!("Device: {}", backup.device_name);
+        println!("Created: {}", backup.created_at.format("%Y-%m-%d %H:%M:%S"));
+        println!("Type: {}", backup.backup_type);
+        println!("Size: {:.2} MB", backup.size as f64 / (1024.0 * 1024.0));
+        if let Some(desc) = &backup.description {
+            println!("Description: {}", desc);
+        }
+    } else {
+        anyhow::bail!("Backup '{}' not found for device '{}'", backup_id, name);
+    }
+
+    Ok(())
+}
+
+pub async fn remove_backup(name: &str, backup_id: &str) -> Result<()> {
+    let config = ConfigManager::new()?;
+    config.remove_backup_file(name, backup_id)?;
+    println!("✅ Backup '{}' removed successfully", backup_id);
+    Ok(())
+}
+
+pub async fn restore_backup(name: &str, backup_id: &str) -> Result<()> {
+    let config = ConfigManager::new()?;
+    let device = config
+        .get_device(name)?
+        .context(format!("Device '{}' not found", name))?;
+
+    let meta = config.load_backup_meta(name)?;
+    let backup = meta.get_backup(backup_id)
+        .context(format!("Backup '{}' not found for device '{}'", backup_id, name))?;
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))  // Longer timeout for restore
+        .build()?;
+
+    // Login first
+    let login_response = client
+        .post(&device.ubus_url())
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "call",
+            "params": [
+                "00000000000000000000000000000000",
+                "session",
+                "login",
+                {
+                    "username": device.user,
+                    "password": device.password
+                }
+            ]
+        }))
+        .send()
+        .await?;
+
+    let login_data = login_response.json::<serde_json::Value>().await?;
+    let session = login_data["result"][1]["ubus_rpc_session"]
+        .as_str()
+        .context("Failed to get session token")?;
+
+    // Read backup file
+    let backup_path = config.get_backup_dir(name)?.join(&backup.filename);
+    let backup_data = fs::read(backup_path)?;
+
+    // Send restore command with backup data
+    client
+        .post(&device.ubus_url())
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "call",
+            "params": [
+                session,
+                "system",
+                "restore",
+                {
+                    "backup": backup_data
+                }
+            ]
+        }))
+        .send()
+        .await?;
+
+    println!("✅ Backup '{}' restored successfully to device '{}'", backup_id, name);
+    println!("ℹ️  The device will reboot to apply the restored configuration");
+    
     Ok(())
 }

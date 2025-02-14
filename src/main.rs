@@ -110,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Backup { command } => {
             match command {
                 BackupCommands::Create { name, description } => {
-                    commands::create_backup(&name, description).await?;
+                    commands::create_backup(&name, description, false).await?;
                 }
                 BackupCommands::List { name } => {
                     commands::list_backups(&name).await?;
@@ -119,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
                     commands::show_backup(&name, &backup_id).await?;
                 }
                 BackupCommands::Restore { name, backup_id } => {
-                    commands::restore_backup(&name, &backup_id).await?;
+                    commands::restore_backup(&name, &backup_id, false).await?;
                 }
                 BackupCommands::Remove { name, backup_id } => {
                     commands::remove_backup(&name, &backup_id).await?;

@@ -1,4 +1,5 @@
 use crate::config::ConfigManager;
+use crate::models::Device;
 use anyhow::{Context, Result};
 use reqwest::{Client, multipart};
 use serde_json::json;
@@ -318,7 +319,7 @@ pub async fn create_backup(name: &str, description: Option<String>, use_ubus: bo
         .build()?;
 
     let temp_file = NamedTempFile::new()?;
-    let mut backup_info;
+    let backup_info;
 
     if use_ubus {
         // Original UBUS-based backup implementation
@@ -489,7 +490,7 @@ pub async fn restore_backup(name: &str, backup_id: &str, use_ubus: bool) -> Resu
 
     // Read backup file
     let backup_path = config.get_backup_dir(name)?.join(&backup.filename);
-    let backup_data = fs::read(backup_path)?;
+    let backup_data = fs::read(&backup_path)?;
 
     if use_ubus {
         // Original UBUS-based restore implementation
@@ -540,7 +541,7 @@ pub async fn restore_backup(name: &str, backup_id: &str, use_ubus: bool) -> Resu
         let session = get_luci_session(&client, &device).await?;
         
         let form = multipart::Form::new()
-            .file("archive", backup_path)?;
+            .part("archive", multipart::Part::bytes(backup_data));
 
         client
             .post(&format!("{}/cgi-bin/luci/admin/system/flashops/restore", device.luci_url()))

@@ -293,6 +293,7 @@ pub async fn reboot_device(name: &str) -> Result<()> {
 
 // Helper function to get LuCI session token
 async fn get_luci_session(client: &Client, device: &Device) -> Result<String> {
+    debug!("Attempting to get LuCI session token for device: {}", device.name);
     let response = client
         .post(&format!("{}/cgi-bin/luci/rpc/auth", device.luci_url()))
         .form(&[
@@ -301,12 +302,18 @@ async fn get_luci_session(client: &Client, device: &Device) -> Result<String> {
         ])
         .send()
         .await?;
+    debug!("Received response from LuCI auth endpoint, status: {}", response.status());
 
     let data = response.json::<serde_json::Value>().await?;
+    debug!("Parsed JSON response from LuCI auth endpoint: {:?}", data);
+
     data["result"]
         .as_str()
         .context("Failed to get LuCI session token")
-        .map(|s| s.to_string())
+        .map(|s| {
+            debug!("Successfully obtained LuCI session token: {}", s);
+            s.to_string()
+        })
 }
 
 pub async fn create_backup(name: &str, description: Option<String>, use_ubus: bool) -> Result<()> {

@@ -74,6 +74,50 @@ pub struct MemoryStatus {
     pub cached: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WifiStatus {
+    pub radio: String,
+    pub up: bool,
+    pub ssid: String,
+    pub mode: String,
+    pub channel: u32,
+    pub txpower: u32,
+    pub country: String,
+    pub clients: Vec<WifiClient>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WifiClient {
+    pub mac: String,
+    pub signal: i32,
+    pub noise: i32,
+    pub rx_rate: u32,
+    pub tx_rate: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DhcpLease {
+    pub ip: String,
+    pub mac: String,
+    pub hostname: String,
+    pub expires: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DnsSettings {
+    pub servers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FirewallRule {
+    pub name: String,
+    pub src: String,
+    pub dest: String,
+    pub proto: String,
+    pub target: String,
+}
+
+
 impl Config {
     pub fn new() -> Self {
         Self {
